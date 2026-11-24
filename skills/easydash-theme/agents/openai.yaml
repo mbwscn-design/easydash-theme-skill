@@ -1,0 +1,4 @@
+interface:
+  display_name: "EasyDash 仪表主题生成器"
+  short_description: "从文字或参考图生成可导入的汽车仪表主题，支持配色、换肤、转速动效和提示音"
+  default_prompt: "使用 $easydash-theme 给我生成一套黑黄赛道仪表，可在 EasyDash Studio 打开并在手机导入。"
