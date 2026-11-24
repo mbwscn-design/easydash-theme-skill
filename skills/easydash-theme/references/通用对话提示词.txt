@@ -1,0 +1,61 @@
+把全文复制到豆包、DeepSeek 或其他 AI 的新对话。在末尾写一句想要的效果，也可以一起发参考图或旧主题文件。
+
+请按我在末尾写的需求，制作能用手机 EasyDash 导入、用电脑 EasyDash Studio 编辑的汽车仪表主题。如果我没写需求，先问我想做什么仪表。配色、字号和间距可以由你决定。
+
+【先排画面】
+有参考图时，提取主读数的位置、刻度、配色和各数据的主次。有原主题时沿用其画布。新作未指定尺寸时用横屏 1280×520，指定竖屏可用 390×760。动态数字、指针和进度用原生组件绑定车辆数据。为最长读数、单位和无数据时的 -- 留空间。模拟数字只用来预览。
+
+【最小完整主题包】
+以下是能直接保存的一份示例。按我的需求替换作品 ID、标题、布局和组件。
+
+```json
+{
+  "format": "easydash.theme",
+  "version": 1,
+  "watchface": {
+    "schemaVersion": 1,
+    "id": "night_voltage",
+    "title": "夜间电压表",
+    "orientation": "landscape",
+    "canvas": {"width": 960, "height": 540, "fit": "contain"},
+    "backgroundColor": "#101719",
+    "elements": [
+      {
+        "type": "metric", "gaugeStyle": "nameplate",
+        "x": 120, "y": 100, "width": 720, "height": 340,
+        "parameter": "battery_voltage", "slot": "supply_voltage", "slotLabel": "电源电压",
+        "label": "电压", "unit": "V", "decimals": 1, "autoLabel": true, "autoUnit": true,
+        "fontSize": 100, "labelSize": 26, "unitSize": 28,
+        "color": "#72E0CB", "labelColor": "#C0D2D0", "backgroundColor": "#192C2C"
+      }
+    ]
+  },
+  "resources": {}
+}
+```
+
+【字段和外观，大小写照写】
+新作品使用独立 id，以英文字母或数字开头，可含下划线、点、连字符，最多 128 字符，不含连续两个点。orientation 为 landscape 或 portrait。elements 放 1 至 128 个组件，按从底到顶排列。每个都写数字 x、y、width、height，原点在画布左上，尺寸为正数。可选 rotation 表示绕中心顺时针旋转的角度。颜色用 #RRGGBB 或 #AARRGGBB。
+• metric 数值卡的 gaugeStyle 可取 timing 计时数字、scanline 扫描数字、sideBand 侧标卡、nameplate 铭牌卡。format 可取 number、gear（档位）或 timer（输入秒）。fontSize、labelSize、unitSize 分别控制数字、标签、单位字号。
+• arcGauge 弧形表可取 segmented 分段环、minimal 细环、trackArc 赛道粗弧、blockArc 断块环。showValue 为 true 显示中心读数。startDegrees 和 sweepDegrees 分别设置起点和跨度。
+• radialGauge 指针表可取 classic 机械盘、minimal 简刻盘。可设 showNeedle、majorTicks、minorTicks、showTickLabels。多指针放在 series 数组，每项写 parameter、slot、slotLabel、color。
+• barGauge 条形表可取 solid 连续条、graduated 阶梯条、blockCells 方格条、dotMatrix 点阵条。layout 为 vertical 时自下往上增长。segments 控制分段，dotColumns 和 dotRows 控制点阵。
+• vehicleDiagram 车辆数据图可取 outline 线框、compact 数据列表。最多四项，把 parameters、slots、slotLabels、labels、units、decimalPlaces 六个数组按相同通道顺序排齐。
+• 上述五类的外观名写入组件的 gaugeStyle，省略或填 standard 可用默认外观。弧形、指针和条形表应按通道原始单位填写 min、max（max 大于 min）。
+• traceChart 绘制历史曲线，series 每项写 parameter、slot、slotLabel、label、color。静态标题用 label 的 text，色块用 panel，分隔线用 line。
+
+【数据从哪里来】
+parameter 是车辆通道 ID，slot 是用户在手机上可以换绑的数据位，slotLabel 是给用户看的中文名。每个动态数据位都写清绑定。同一转速的数字、环和提示音需要一起换绑时共用 slot 和默认 parameter；想分开换绑就各用一个 slot。普通数值卡用 autoLabel、autoUnit 跟随换绑。
+常用通道和原始单位：车速 speed（km/h），转速 rpm（RPM），水温 coolant_temp_std、进气温度 intake_temp_std、机油温度 oil_temp_std（均为 °C），电压 battery_voltage（V，通常一位小数），节气门 throttle_std、发动机负荷 engine_load_std（均为 %），进气歧管绝对压力 turbo_std（kPa），空气流量 maf_std（g/s），发动机运行时长 run_time_std（s）。车型支持时也可用厂家通道：档位 gear_lufi1（unit 填 ""，format 填 gear）、油温 oil_temp_lufi1（°C）、变速箱油温 gearbox_temp_cma_t2（°C）。
+未列出的通道请依据我提供的 EasyDash 参数 ID。读不到的普通数值由应用显示 --，不要补 0 或绘制固定读数。只改 unit 不会换算数值。数值卡如需换算可设 valueScale、valueOffset，显示值＝原始值×系数＋偏移。将 turbo_std 标为绝对压力；相对增压需要额外的基准压力或已换算通道。报警用 alarmEnabled 和 lowThreshold、highThreshold 或 dangerThreshold，按车型或我的要求填写原始单位的阈值。
+
+【图片、声音与旧作】
+新作默认用原生组件，参考图可只用于构图。需要嵌入实际素材且你能读写文件时，image 用 url，rpmImage 用 idleUrl、focusUrl、redlineUrl 和 idleThreshold、redlineThreshold（RPM）。引用写 resource:文件名，包外层 resources 以文件名映射真实 PNG/JPEG/WebP 的 Base64。声音放在外层 audioResources，watchface.soundCues 数组的每项写唯一 id、slot、parameter、source（resource:文件名.wav）、threshold、hysteresis（正数）、minIntervalMs（250–60000 整数）、volume（0–1）。WAV 为 16 位 PCM、最多 3 秒。只有能实际生成附件时才交付带素材的文件。
+网页仅能回文字时，新作先交付完整无素材主题，resources 为 {}，去掉未嵌入的资源引用和音效。若我要求用自己的素材，在代码块外告诉我到 Studio 的「图片」或「转速三态图片」组件选图，或到「主题音效 → 添加音效」选择 WAV，然后「导出到 EasyDash」。不要编造附件、下载链接、素材或 Base64，也不要叫我复制大段 Base64。
+若我说「更新旧作」，请基于原包副本仅修改我点名的部分。保留原 id、原有用途的 slot 和多通道顺序，以及其他既有设置、资源引用、resources、audioResources 和 soundCues。新用途才增加槽位，新版另存。只有截图但要保留绑定时，请我提供原包。仅能回文字且旧包带素材时，给我在 Studio 打开原包副本、逐项修改并导出的具体步骤，保留原包里的图音，不要拿空资源包交差。
+
+【交付】
+能生成真实文件时交付一个「作品名.easydash.json」。仅能回文字时，把完整主题放在唯一一个 json 代码块中，一次给全，只用标准 JSON 双引号，不带注释、尾逗号、省略号或占位符。告诉我只复制块内从第一个 { 到最后一个 }，用纯文本按 UTF-8 保存为「作品名.easydash.json」，检查文件名末尾没有多出的 .txt。上面带素材旧作的文字回退按其专门步骤处理。
+在代码块或附件外，用一句话说明默认绑定了哪些读数以及如何打开：电脑 EasyDash Studio「打开工程 → 播放模拟数据」，手机 EasyDash「主题中心 → 导入主题」。交付前核对括号、通道单位、画布边界、层次与引用；只报告你实际做过的检查。
+
+我的需求：

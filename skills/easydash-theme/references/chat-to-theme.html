@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'">
+<title>EasyDash 主题文件导出</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #f2f3f0; color: #111719;
+    font: 16px/1.6 Inter, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  main { width: min(100%, 780px); margin: 0 auto; padding: clamp(24px, 7vh, 64px) 16px; }
+  h1 { margin: 0; font-size: clamp(22px, 4vw, 28px); line-height: 1.35; }
+  p { margin: 0; }
+  header p, .hint { color: #535e61; }
+  header p { margin: 8px 0 24px; }
+  form { background: white; border: 1px solid #d7dcda; border-radius: 12px; padding: clamp(16px, 4vw, 28px); }
+  label { display: block; font-weight: 700; }
+  .hint { margin: 4px 0 14px; font-size: 14px; }
+  textarea {
+    display: block; width: 100%; min-height: 180px; height: clamp(200px, 33vh, 330px);
+    resize: vertical; padding: 14px; color: #111719; background: #fafbf8;
+    border: 1px solid #a8b2af; border-radius: 8px;
+    font: 14px/1.6 ui-monospace, Menlo, Consolas, monospace;
+  }
+  textarea[aria-invalid="true"] { border-color: #b03434; }
+  button { margin-top: 18px; padding: 10px 22px; min-height: 46px; border: 1px solid #9bc532;
+    border-radius: 8px; background: #b7e43b; color: #111719; font: inherit; font-weight: 700; cursor: pointer; }
+  button:hover { background: #acd736; }
+  :focus-visible { outline: 2px solid #007d83; outline-offset: 3px; }
+  #status { margin-top: 12px; overflow-wrap: anywhere; font-size: 14px; color: #00696f; }
+  #status:empty { margin: 0; }
+  #status.error, noscript { color: #a52e2e; }
+  footer { margin-top: 18px; color: #535e61; font-size: 14px; }
+</style>
+<main>
+  <header>
+    <h1>EasyDash 主题文件导出</h1>
+    <p>把豆包或 DeepSeek 生成的 JSON 保存为主题文件。整个过程在本机完成。</p>
+  </header>
+  <form id="export-form">
+    <label for="source">主题 JSON</label>
+    <p class="hint" id="hint">复制完整的 JSON 对象或单个 JSON 代码块，粘贴到下方。</p>
+    <textarea id="source" aria-describedby="hint status" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="在此粘贴主题 JSON"></textarea>
+    <button type="submit">下载主题文件</button>
+    <p id="status" role="status" aria-live="polite" aria-atomic="true"></p>
+    <noscript>请在浏览器中启用 JavaScript 以生成文件。</noscript>
+  </form>
+  <footer>此页做基本格式检查。下载后，在 EasyDash Studio 选择「打开工程」预览，或在手机「主题中心 → 导入主题」选择文件，由客户端完整校验。</footer>
+</main>
+<script>
+  'use strict';
+  const MiB = 1024 * 1024;
+  const elementTypes = new Set([
+    'label', 'panel', 'metric', 'arcGauge', 'radialGauge', 'barGauge', 'vehicleDiagram',
+    'traceChart', 'line', 'grid', 'image', 'rpmImage'
+  ]);
+  const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const owns = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+  const dimension = (value, max) => Number.isFinite(value) && value > 0 && value <= max;
+  function check(ok, message) { if (!ok) throw new Error(message); }
+
+  function jsonText(input) {
+    let source = input.trim();
+    check(source, '请先粘贴完整的主题 JSON。');
+    if (source.startsWith('```')) {
+      const first = source.indexOf('\n');
+      const last = source.lastIndexOf('\n');
+      check(first >= 0 && last > first && /^```(?:json)?$/i.test(source.slice(0, first).trim()) &&
+        source.slice(last + 1).trim() === '```', '请复制一个完整的 JSON 代码块，包含开头和结尾的三反引号。');
+      source = source.slice(first + 1, last).trim();
+    }
+    check(source.length <= 32 * MiB, '主题文件不能超过 32 MiB。');
+    return source;
+  }
+
+  function checkResources(entries, audio, names) {
+    const key = audio ? 'audioResources' : 'resources';
+    check(isObject(entries), key + ' 必须是以文件名为键的 JSON 对象。');
+    const keys = Object.keys(entries);
+    check(keys.length <= (audio ? 8 : 64), '一个主题最多可包含 64 张图片和 8 个音效。');
+    let total = 0;
+    for (const name of keys) {
+      const lower = name.toLowerCase();
+      check(/^[a-z0-9][a-z0-9_.-]{0,119}\.(png|jpe?g|webp|wav)$/i.test(name) && !name.includes('..') &&
+        lower.endsWith('.wav') === audio, key + ' 中有无效的文件名或文件类型。');
+      check(!names.has(lower), '资源文件名重复（忽略大小写）：' + name);
+      names.add(lower);
+      const encoded = entries[name];
+      const limit = audio ? 600 * 1024 : 8 * MiB;
+      check(typeof encoded === 'string' && encoded.length > 0 && encoded.length <= Math.ceil(limit / 3) * 4,
+        '素材内容为空、过大或不是 Base64 文本：' + name);
+      let bytes;
+      try {
+        const base64 = encoded.includes('%') ? decodeURIComponent(encoded) : encoded;
+        if (/\s/.test(base64)) throw new Error();
+        bytes = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
+      } catch {
+        throw new Error('素材的 Base64 内容不完整或无效：' + name);
+      }
+      check(bytes.length > 0 && bytes.length <= limit, '素材大小超出范围：' + name);
+      let validHeader;
+      if (audio) {
+        validHeader = bytes.length >= 44 && bytes.startsWith('RIFF') && bytes.slice(8, 12) === 'WAVE';
+      } else if (lower.endsWith('.png')) {
+        validHeader = bytes.length >= 33 && bytes.startsWith('\x89PNG\r\n\x1a\n') && bytes.slice(12, 16) === 'IHDR';
+      } else if (lower.endsWith('.webp')) {
+        validHeader = bytes.length >= 30 && bytes.startsWith('RIFF') && bytes.slice(8, 12) === 'WEBP';
+      } else {
+        validHeader = bytes.startsWith('\xff\xd8\xff') && bytes.endsWith('\xff\xd9');
+      }
+      check(validHeader, '素材内容与文件格式不符：' + name);
+      total += bytes.length;
+    }
+    return total;
+  }
+
+  function checkImage(ref, images, field) {
+    if (ref == null || ref === '') return;
+    check(typeof ref === 'string', '图片的 ' + field + ' 必须是字符串。');
+    const assetField = field.toLowerCase().endsWith('asset');
+    if (assetField) check(ref.startsWith('assets/'), field + ' 必须引用应用内 assets/ 路径。');
+    if (ref.startsWith('resource:')) {
+      const name = ref.slice(9);
+      check(owns(images, name), '缺少图片 ' + name + '。请复制含对应 resources 的完整主题包。');
+      return;
+    }
+    let path = ref.split(/[?#]/, 1)[0];
+    for (let i = 0; i < 4; i++) {
+      check(!path.includes('\\') && !path.split('/').some(part => part === '.' || part === '..'), '图片路径不能包含目录穿越。');
+      let decoded;
+      try { decoded = decodeURIComponent(path); } catch { throw new Error('图片路径的编码无效。'); }
+      if (decoded === path) break;
+      path = decoded;
+    }
+    check(!ref.includes('\\'), '图片路径中不能有反斜杠。');
+    if (ref.startsWith('assets/') && !/[?#]/.test(ref)) return;
+    let uri;
+    try { uri = new URL(ref); } catch { /* Show the supported forms below. */ }
+    check(uri && uri.protocol === 'https:' && uri.hostname && !uri.username && !uri.password,
+      '图片应引用包内 resource: 文件、应用内 assets/ 路径或 HTTPS 地址。');
+  }
+
+  function checkManifest(theme, images, sounds) {
+    check(isObject(theme) && theme.schemaVersion === 1, '主题清单必须是 schemaVersion 为 1 的 JSON 对象。');
+    check(typeof theme.id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(theme.id) &&
+      !theme.id.includes('..'), '主题 id 需以字母或数字开头，仅含字母、数字、点、下划线或连字符，最长 128 字符，不能有连续两个点。');
+    check(typeof theme.title === 'string' && theme.title.trim() && theme.title.length <= 120, '主题 title 不能为空或超过 120 字符。');
+    check(['portrait', 'landscape'].includes(theme.orientation), '主题 orientation 应为 portrait 或 landscape。');
+    const canvas = theme.canvas;
+    check(isObject(canvas) && dimension(canvas.width, 8192) && dimension(canvas.height, 8192) &&
+      canvas.width * canvas.height <= 32 * MiB, '画布宽高必须为正数，每边最多 8192，总像素最多 33,554,432。');
+    check(canvas.fit == null || ['contain', 'cover', 'fill', 'fitWidth', 'fitHeight'].includes(canvas.fit), '画布 fit 无效。');
+    check(Array.isArray(theme.elements) && theme.elements.length > 0 && theme.elements.length <= 128, '可导入的主题需要 1 至 128 个元素。');
+    for (const [index, item] of theme.elements.entries()) {
+      const label = '第 ' + (index + 1) + ' 个元素';
+      check(isObject(item) && elementTypes.has(item.type), label + '的 type 无效。');
+      check([item.x, item.y].every(n => Number.isFinite(n) && Math.abs(n) <= 16384) &&
+        dimension(item.width, 16384) && dimension(item.height, 16384), label + '的 x、y、width 或 height 无效。');
+      let fields = [];
+      if (item.type === 'image') {
+        fields = item.cueId == null ? ['url', 'asset'] : ['url', 'asset', 'focusUrl', 'focusAsset'];
+      } else if (item.type === 'rpmImage') {
+        fields = ['idleUrl', 'focusUrl', 'redlineUrl', 'idleAsset', 'focusAsset', 'redlineAsset'];
+      }
+      for (const field of fields) checkImage(item[field], images, field);
+    }
+    const cues = theme.soundCues ?? [];
+    check(Array.isArray(cues) && cues.length <= 8, 'soundCues 最多包含 8 个音效。');
+    const ids = new Set();
+    for (const cue of cues) {
+      check(isObject(cue) && typeof cue.id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(cue.id) &&
+        !ids.has(cue.id), '音效 id 无效或重复。');
+      ids.add(cue.id);
+      check([cue.slot, cue.parameter].every(s => typeof s === 'string' && s && s.trim() === s && s.length <= 128) &&
+        Number.isFinite(cue.threshold), '音效缺少有效的 slot、parameter 或 threshold。');
+      check(typeof cue.source === 'string' && cue.source.startsWith('resource:') && /\.wav$/i.test(cue.source),
+        '音效 source 必须引用包内 WAV 文件。');
+      const name = cue.source.slice(9);
+      check(owns(sounds, name), '缺少音效 ' + name + '。请复制含对应 audioResources 的完整主题包。');
+    }
+  }
+
+  function buildFile(input) {
+    const source = jsonText(input);
+    let data;
+    try { data = JSON.parse(source); } catch {
+      throw new Error('JSON 格式有误。请检查是否复制完整，并移除说明文字、注释或多余的逗号。');
+    }
+    check(isObject(data), '请粘贴一个完整的 JSON 对象。');
+    const bare = !owns(data, 'format') && owns(data, 'schemaVersion');
+    check(bare || (data.format === 'easydash.theme' && data.version === 1), '仅支持 EasyDash v1 主题包或 schemaVersion 为 1 的独立主题清单。');
+    const images = data.resources ?? {};
+    const sounds = data.audioResources ?? {};
+    const names = new Set();
+    if (bare) {
+      check(isObject(images) && isObject(sounds) && !Object.keys(images).length && !Object.keys(sounds).length,
+        '带素材时请使用完整主题包，将清单放入 watchface，素材放入同级 resources 或 audioResources。');
+    }
+    const imageBytes = checkResources(images, false, names);
+    const soundBytes = checkResources(sounds, true, names);
+    check(imageBytes + soundBytes <= 24 * MiB, '图片与音效合计不能超过 24 MiB。');
+    const theme = bare ? data : data.watchface;
+    checkManifest(theme, images, sounds);
+    // Use original JSON text to retain extensions, resource bytes and numeric literals.
+    const parts = bare ? ['{"format":"easydash.theme","version":1,"watchface":', source, ',"resources":{}}'] : [source];
+    const blob = new Blob(parts, {type: 'application/json;charset=utf-8'});
+    check(blob.size <= 32 * MiB, '主题文件不能超过 32 MiB。');
+    return {blob, filename: theme.id + '.easydash.json'};
+  }
+
+  const form = document.getElementById('export-form');
+  const sourceBox = document.getElementById('source');
+  const status = document.getElementById('status');
+  sourceBox.addEventListener('input', () => {
+    sourceBox.removeAttribute('aria-invalid');
+    status.textContent = '';
+    status.className = '';
+  });
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    try {
+      const {blob, filename} = buildFile(sourceBox.value);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      try { link.click(); } finally {
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }
+      sourceBox.removeAttribute('aria-invalid');
+      status.className = '';
+      status.textContent = '已通过基本检查，已请求下载 ' + filename + '。';
+    } catch (error) {
+      sourceBox.setAttribute('aria-invalid', 'true');
+      status.className = 'error';
+      status.textContent = error.message;
+    }
+  });
+</script>
+</html>
